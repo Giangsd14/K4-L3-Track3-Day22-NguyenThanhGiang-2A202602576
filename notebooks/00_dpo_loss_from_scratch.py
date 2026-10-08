@@ -59,8 +59,10 @@ print(f"sum log p = {total.item():.3f}   mean log p = {mean.item():.3f}")
 # %%
 def my_dpo_loss(pc, pr, rc, rr, beta=0.1):
     """pc/pr: policy log-prob chosen/rejected; rc/rr: reference. Trả về loss trung bình."""
-    # TODO: viết bằng torch.nn.functional.logsigmoid
-    return None
+    chosen_reward = beta * (pc - rc)
+    rejected_reward = beta * (pr - rr)
+    loss = -torch.nn.functional.logsigmoid(chosen_reward - rejected_reward)
+    return loss.mean()
 
 
 # %%
@@ -122,6 +124,19 @@ for name, (pc_, pr_) in scenarios.items():
     print(f"{name:28s} RPO loss {M.rpo_loss(pc_, pr_, ref_c, ref_r, nll, beta=1.0).item():.3f}")
 
 # %% [markdown]
+# ### Giải thích lý thuyết: Vì sao margin tăng khi log-prob của chosen giảm?
+#
+# DPO định nghĩa reward ngầm định là $r(y) = \beta(\log \pi(y) - \log \pi_{ref}(y))$. Margin giữa hai câu trả lời là:
+# $$\Delta r = r(y_c) - r(y_r) = \beta\big[(\log \pi(y_c) - \log \pi_{ref}(y_c)) - (\log \pi(y_r) - \log \pi_{ref}(y_r))\big]$$
+# Loss DPO là $-\log \sigma(\Delta r)$. Loss này chỉ quan tâm đến **hiệu số** $\Delta r$.
+#
+# Khi gradient cập nhật mô hình:
+# - Nếu câu bị loại ($y_r$) chứa các lỗi sai rõ ràng hoặc đặc trưng dễ bị phạt, xác suất của nó $\pi(y_r)$ có thể tụt giảm rất nhanh ($\Delta \log \pi(y_r) \ll 0$).
+# - Dù xác suất của câu được chọn $\pi(y_c)$ cũng bị suy giảm nhẹ ($\Delta \log \pi(y_c) < 0$), nhưng vì $\pi(y_r)$ giảm **nhanh hơn nhiều**, hiệu số $\Delta r$ vẫn là một giá trị dương tăng dần.
+# - Kết quả là loss vẫn giảm và margin vẫn tăng, dù mô hình thực tế đang giảm xác suất sinh câu $y_c$. Đây chính là hiện tượng **Dịch chuyển xác suất (Likelihood Displacement)**.
+# - RPO giải quyết hiện tượng này bằng cách cộng thêm số hạng NLL của câu chosen: $\mathcal{L}_{RPO} = \mathcal{L}_{DPO} + \alpha \cdot \text{NLL}(y_c)$, ép mô hình không được phép hạ thấp xác suất của câu được chọn.
+
+# %% [markdown]
 # ## 6. Bốn biến thể trên cùng một cặp
 #
 # | Loss | Cần mô hình tham chiếu (reference)? | Chuẩn hoá độ dài? | Ghi chú |
@@ -148,3 +163,13 @@ print(f"ORPO  {M.orpo_loss(avg_c, avg_r, -avg_c).item():.4f}")
 # **Câu hỏi cho REFLECTION §3:** tổng log-prob của câu dài luôn âm hơn câu ngắn.
 # Vì sao điều đó khiến DPO gốc dễ thiên vị độ dài, và SimPO/ORPO xử lý bằng cách nào?
 # Gợi ý: NB2 in ra tỉ lệ cặp có chosen dài hơn rejected trong dữ liệu tiếng Việt.
+#
+# ### Giải thích lý thuyết: Thiên vị độ dài của DPO gốc và giải pháp SimPO/ORPO
+#
+# 1. **Vì sao DPO gốc thiên vị độ dài?**
+#    Tổng log-prob của một câu hoàn chỉnh là $\sum_{t=1}^{|y|} \log \pi(y_t | x, y_{<t})$. Vì mỗi $\log \pi < 0$, chuỗi càng dài (nhiều token) thì tổng log-prob càng tích lũy thành số âm lớn hơn.
+#    Trong hàm loss DPO gốc, sự chênh lệch không được chuẩn hóa theo độ dài chuỗi $|y|$. Nếu trong tập dữ liệu có sự mất cân bằng độ dài (ví dụ câu chosen thường dài hơn câu rejected, đo được ở NB2), mô hình sẽ học được mẹo ăn gian (shortcut / length hacking): chỉ cần sinh câu trả lời dài hơn là margin sẽ tăng mạnh, thay vì học cách cải thiện chất lượng nội dung.
+#
+# 2. **SimPO và ORPO giải quyết như thế nào?**
+#    - **SimPO (Simple Preference Optimization):** Chia tổng log-prob cho độ dài câu $|y|$ để sử dụng average token log-prob: $\frac{1}{|y|} \log \pi(y|x)$. Đồng thời đặt thêm một biên margin mục tiêu $\gamma > 0$ vào hàm sigmoid: $-\log \sigma(\beta(\bar{p}_c - \bar{p}_r) - \gamma)$. Cách này chuẩn hóa hoàn toàn theo độ dài và không cần reference model.
+#    - **ORPO (Odds Ratio Preference Optimization):** Sử dụng log-odds-ratio chuẩn hóa theo độ dài kết hợp trực tiếp với SFT loss $NLL(y_c)$. Tỷ số odds $\frac{p}{1-p}$ trên xác suất trung bình của token giúp phạt câu rejected một cách độc lập với độ dài tuyệt đối của phản hồi.

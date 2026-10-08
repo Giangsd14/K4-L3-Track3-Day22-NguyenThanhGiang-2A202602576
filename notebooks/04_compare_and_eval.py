@@ -242,3 +242,43 @@ print(json.dumps(summary, ensure_ascii=False, indent=2))
 # - +4 độ chặt chẽ: chạy thêm giám khảo qua API khác họ (ví dụ `JUDGE_PROVIDER=gemini`) và báo `cross_judge.agreement`.
 #
 # **Tiếp theo:** NB5 (GGUF) hoặc NB6 (benchmark).
+
+
+# %% [markdown]
+# ## 6. Đóng gói kết quả (Tải về máy để kiểm tra `make verify` và nộp bài)
+#
+# Đoạn code dưới đây tự động nén toàn bộ artifacts bắt buộc (ảnh biểu đồ, split dữ liệu,
+# metrics huấn luyện, kết quả đánh giá) thành một file zip để tải về máy tiện lợi.
+
+# %%
+import os
+import zipfile
+
+if os.path.exists("/content"):
+    try:
+        from google.colab import files
+        zip_path = "/content/lab22_core_artifacts.zip"
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+            for folder in [
+                "/content/lab22/submission/screenshots",
+                "/content/lab22/data/pref",
+                "/content/lab22/data/eval",
+            ]:
+                if os.path.exists(folder):
+                    for root, _, fnames in os.walk(folder):
+                        for fname in fnames:
+                            fpath = os.path.join(root, fname)
+                            zipf.write(fpath, os.path.relpath(fpath, "/content/lab22"))
+            for single_file in [
+                "/content/lab22/adapters/sft-mini/adapter_config.json",
+                "/content/lab22/models/sft-merged/config.json",
+                "/content/lab22/adapters/dpo/adapter_config.json",
+                "/content/lab22/adapters/dpo/dpo_metrics.json",
+                "/content/lab22/adapters/dpo/split.json",
+            ]:
+                if os.path.exists(single_file):
+                    zipf.write(single_file, os.path.relpath(single_file, "/content/lab22"))
+        print(f"✓ Đã nén thành công {zip_path}. Đang mở hộp thoại tải về máy...")
+        files.download(zip_path)
+    except Exception as exc:
+        print(f"ℹ Lưu ý tải file: {exc}")

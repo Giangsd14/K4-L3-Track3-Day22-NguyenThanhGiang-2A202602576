@@ -109,12 +109,27 @@ def render(tier: str) -> dict:
         code(
             "import os\n"
             f'os.environ["COMPUTE_TIER"] = "{tier}"\n'
-            "# NB4 judges automatically with a panel of two local reward models (no key needed).\n"
-            "# Optional API judge as a cross-check (two A/B orders):\n"
-            '# os.environ["JUDGE_PROVIDER"] = "gemini"   # or "openai" / "anthropic"\n'
-            '# os.environ["JUDGE_MODEL"] = "<current model id>"\n'
-            '# from google.colab import userdata; os.environ["GEMINI_API_KEY"] = userdata.get("GEMINI_API_KEY")\n'
-            "# Put API keys in Colab secrets, never in the notebook."
+            "# Tự động phát hiện API Key (OpenAI hoặc Gemini) từ Colab Secrets / biến môi trường:\n"
+            "try:\n"
+            "    from google.colab import userdata\n"
+            '    for _var in ("OPENAI_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY"):\n'
+            "        try:\n"
+            "            _val = userdata.get(_var)\n"
+            "            if _val: os.environ[_var] = _val\n"
+            "        except Exception:\n"
+            "            pass\n"
+            "except Exception:\n"
+            "    pass\n\n"
+            'if os.environ.get("OPENAI_API_KEY"):\n'
+            '    os.environ.setdefault("JUDGE_PROVIDER", "openai")\n'
+            '    os.environ.setdefault("JUDGE_MODEL", "gpt-4o")\n'
+            '    print("✓ Đã cấu hình Giám khảo OpenAI API (gpt-4o) cho NB4.")\n'
+            'elif os.environ.get("GEMINI_API_KEY"):\n'
+            '    os.environ.setdefault("JUDGE_PROVIDER", "gemini")\n'
+            '    os.environ.setdefault("JUDGE_MODEL", "gemini-2.5-flash")\n'
+            '    print("✓ Đã cấu hình Giám khảo Gemini API (gemini-2.5-flash) cho NB4.")\n'
+            "else:\n"
+            '    print("ℹ Không thấy OPENAI_API_KEY hoặc GEMINI_API_KEY -> NB4 sẽ dùng Reward Model local.")\n'
         ),
         code(f"!pip install -q {pins}" + (' "vllm>=0.10"' if big else "")),
         code(
